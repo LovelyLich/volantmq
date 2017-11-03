@@ -1,0 +1,9 @@
+{
+	"mqtt" : {
+		"auth" : {
+			"dbAuth" : {
+				"DSN": "root:qmzpwnxo@tcp/user_auth"
+			}
+		}
+	}
+}
