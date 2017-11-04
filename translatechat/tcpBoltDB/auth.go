@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
+	"golang.org/x/crypto/bcrypt"
 
 	_ "github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
@@ -30,22 +31,23 @@ func (a DbAuth) Password(user, password string) auth.Status {
 	}
 	defer db.Close()
 
-	var passwd string
-	err = db.QueryRow("SELECT passwd FROM user_auth WHERE phoneno = ?", user).Scan(&passwd)
-	logger.Info("Query database result:",
-		zap.String("database_user", user),
-		zap.String("database_password", passwd),
-	)
+	var dbToken, expireTime string
+	err = db.QueryRow("SELECT token, token_expire_time FROM user_auth WHERE phoneno = ?", user).Scan(&dbToken, &expireTime)
 	if err != nil {
 		logger.Error("Couldn't query table user_auth", zap.Error(err))
 		return auth.StatusDeny
 	}
-
-	if password == passwd {
-		logger.Info("authorization success", zap.String("user", user))
-		return auth.StatusAllow
+	//校验Token是否正确
+	if isExpired(expireTime) {
+		logger.Error("Token has been expired", zap.String("user", user))
+		return auth.StatusDeny
 	}
-	return auth.StatusDeny
+	err = bcrypt.CompareHashAndPassword([]byte(dbToken), []byte(password))
+	if err != nil {
+		return auth.StatusDeny
+	}
+
+	return auth.StatusAllow
 }
 
 // nolint: golint
