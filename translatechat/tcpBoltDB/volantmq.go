@@ -21,6 +21,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/signal"
@@ -600,6 +601,57 @@ func doDelFriend(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	}
 }
 
+func doUploadPhoto(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	var ret = struct {
+		AvatarUrl string
+	}{}
+	phoneNo, token, _, err := getAuthFromReq(r)
+	if !checkAuth(phoneNo, token) {
+		err := fmt.Errorf("Invalid authorization information!")
+		return nil, err
+	}
+	r.ParseMultipartForm(32 << 20)
+
+	var file multipart.File
+	var handler *multipart.FileHeader
+	file, handler, err = r.FormFile("uploadfile")
+	if err != nil {
+		logger.Error("get form file failed", zap.Error(err))
+		return nil, err
+	}
+	defer file.Close()
+
+	//获取文件后缀
+	s := strings.Split(handler.Filename, ".")
+	if len(s) < 2 {
+		err = fmt.Errorf("Invalid form filename %s", handler.Filename)
+		return nil, err
+	}
+	suffix := s[len(s)-1]
+	logger.Info("get form file", zap.String("filename", handler.Filename), zap.String("suffix", suffix))
+
+	//构造目录
+	dir := "./upload/" + phoneNo
+	err = os.MkdirAll(dir, os.ModePerm)
+	f, err := os.OpenFile(dir+"/avatar."+suffix, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		logger.Error("Create photo file failed", zap.Error(err))
+		return nil, err
+	}
+	defer f.Close()
+	io.Copy(f, file)
+
+	//保存下载路径到数据库
+	newFileName := phoneNo + "/avatar." + suffix
+	_, err = db.Exec("UPDATE users SET avatar=? WHERE phoneno=?", newFileName, phoneNo)
+	if err != nil {
+		logger.Error("Update account avatar failed", zap.String("user", phoneNo), zap.String("avatr_url", newFileName), zap.Error(err))
+		return nil, err
+	}
+	ret.AvatarUrl = newFileName
+	return ret, nil
+}
+
 func handleUserRegister(w http.ResponseWriter, r *http.Request) {
 	resp, err := doUserRegister(w, r)
 	HandleResponse(w, r, resp, err)
@@ -641,6 +693,11 @@ func handleDelFriend(w http.ResponseWriter, r *http.Request) {
 	HandleResponse(w, r, resp, err)
 }
 
+func handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
+	resp, err := doUploadPhoto(w, r)
+	HandleResponse(w, r, resp, err)
+}
+
 func handleTest(w http.ResponseWriter, r *http.Request) {
 	HandleResponse(w, r, nil, nil)
 }
@@ -656,6 +713,10 @@ func startApiListener() {
 	http.HandleFunc("/friends/get_list", handleGetFriendList)
 	http.HandleFunc("/friends/add_friend", handleAddFriend)
 	http.HandleFunc("/friends/del_friend", handleDelFriend)
+	http.HandleFunc("/upload/photo", handleUploadPhoto) //头像上传接口
+	//下载目录
+	fsh := http.FileServer(http.Dir("./upload"))
+	http.Handle("/download/", http.StripPrefix("/download/", fsh))
 	http.HandleFunc("/test", handleTest)
 	go func() {
 		//err := http.ListenAndServeTLS(":8080", "cert.pem", "key.pem", nil)
