@@ -43,9 +43,10 @@ import (
 )
 
 var (
-	logger   *zap.Logger
-	db       *sql.DB
-	expireAt = 24 * 7 //默认token超时时间为10天
+	logger          *zap.Logger
+	db              *sql.DB
+	expireAt        = 24 * 7                                                       //默认token超时时间为10天
+	changeTypeArray = []string{"nickname", "region", "avatar", "signature", "sex"} //允许修改的用户信息列名
 )
 
 type RegisterInfo struct {
@@ -198,7 +199,14 @@ func Users2FriendList(users []UserInfo) FriendList {
 	fl.Friends = append(fl.Friends, gfl)
 	return fl
 }
-
+func checkChangeTypeValid(changeType string) bool {
+	for _, v := range changeTypeArray {
+		if changeType == v {
+			return true
+		}
+	}
+	return false
+}
 func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	var ret = struct {
 		PhoneNo    string
@@ -404,6 +412,64 @@ func doGetUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) 
 	}
 	return user, nil
 }
+
+func doChangeUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	phoneNo, token, _, err := getAuthFromReq(r)
+	if !checkAuth(phoneNo, token) {
+		err := fmt.Errorf("Invalid authorization information!")
+		return nil, err
+	}
+	//检查用户是否存在
+	var tmp string
+	err = db.QueryRow("SELECT phoneno FROM users WHERE phoneno=?", phoneNo).Scan(&tmp)
+	if err != nil {
+		logger.Error("User doesn't exists", zap.String("issue_user", phoneNo))
+		return nil, err
+	}
+
+	changeValue := r.URL.Query().Get("value")
+	changeType := r.URL.Query().Get("type")
+	if changeType == "nickname" {
+		//更新信息
+		_, err = db.Exec("UPDATE users SET nickname=? WHERE phoneno=?", changeValue, phoneNo)
+		if err != nil {
+			logger.Error("Update account info failed", zap.String("user", phoneNo), zap.String("changeType", changeType), zap.String("changeValue", changeValue), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	} else if changeType == "region" {
+		//更新信息
+		_, err = db.Exec("UPDATE users SET region=? WHERE phoneno=?", changeValue, phoneNo)
+		if err != nil {
+			logger.Error("Update account info failed", zap.String("user", phoneNo), zap.String("changeType", changeType), zap.String("changeValue", changeValue), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	} else if changeType == "signature" {
+		//更新信息
+		_, err = db.Exec("UPDATE users SET signature=? WHERE phoneno=?", changeValue, phoneNo)
+		if err != nil {
+			logger.Error("Update account info failed", zap.String("user", phoneNo), zap.String("changeType", changeType), zap.String("changeValue", changeValue), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	} else if changeType == "sex" {
+		//更新信息
+		_, err = db.Exec("UPDATE users SET sex=? WHERE phoneno=?", changeValue, phoneNo)
+		if err != nil {
+			logger.Error("Update account info failed", zap.String("user", phoneNo), zap.String("changeType", changeType), zap.String("changeValue", changeValue), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+
+	} else {
+		err := fmt.Errorf("Invalid change type!")
+		return nil, err
+
+	}
+
+}
+
 func doGetFriendList(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	phoneNo, token, _, err := getAuthFromReq(r)
 	if !checkAuth(phoneNo, token) {
@@ -525,6 +591,11 @@ func handleGetUserInfo(w http.ResponseWriter, r *http.Request) {
 	HandleResponse(w, r, resp, err)
 }
 
+func handleChangeUserInfo(w http.ResponseWriter, r *http.Request) {
+	resp, err := doChangeUserInfo(w, r)
+	HandleResponse(w, r, resp, err)
+}
+
 func handleGetFriendList(w http.ResponseWriter, r *http.Request) {
 	resp, err := doGetFriendList(w, r)
 	HandleResponse(w, r, resp, err)
@@ -549,6 +620,7 @@ func startApiListener() {
 	http.HandleFunc("/users/register/get_validate_code", handleGetValidateCode)
 	http.HandleFunc("/users/login", handleLogin)
 	http.HandleFunc("/users/get_user_info", handleGetUserInfo)
+	http.HandleFunc("/users/change_user_info", handleChangeUserInfo)
 	http.HandleFunc("/friends/get_list", handleGetFriendList)
 	http.HandleFunc("/friends/add_friend", handleAddFriend)
 	http.HandleFunc("/friends/del_friend", handleDelFriend)
