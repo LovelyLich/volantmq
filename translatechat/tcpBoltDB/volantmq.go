@@ -627,11 +627,11 @@ func startApiListener() {
 	http.HandleFunc("/test", handleTest)
 	go func() {
 		//err := http.ListenAndServeTLS(":8080", "cert.pem", "key.pem", nil)
-		err := http.ListenAndServe(":8080", nil)
+		err := http.ListenAndServe(":3389", nil)
 		if err != nil {
 			logger.Error("Couldn't start Api listener", zap.Error(err))
 		}
-		logger.Info("Start Api listener on :8080")
+		logger.Info("Start Api listener on :3389")
 	}()
 }
 
