@@ -43,10 +43,9 @@ import (
 )
 
 var (
-	logger          *zap.Logger
-	db              *sql.DB
-	expireAt        = 24 * 7                                                       //默认token超时时间为10天
-	changeTypeArray = []string{"nickname", "region", "avatar", "signature", "sex"} //允许修改的用户信息列名
+	logger   *zap.Logger
+	db       *sql.DB
+	expireAt = 24 * 7 //默认token超时时间为10天
 )
 
 type RegisterInfo struct {
@@ -199,14 +198,7 @@ func Users2FriendList(users []UserInfo) FriendList {
 	fl.Friends = append(fl.Friends, gfl)
 	return fl
 }
-func checkChangeTypeValid(changeType string) bool {
-	for _, v := range changeTypeArray {
-		if changeType == v {
-			return true
-		}
-	}
-	return false
-}
+
 func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	var ret = struct {
 		PhoneNo    string
@@ -461,13 +453,19 @@ func doChangeUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, erro
 			return nil, err
 		}
 		return nil, nil
-
+	} else if changeType == "avatar" {
+		//更新信息
+		_, err = db.Exec("UPDATE users SET avatar=? WHERE phoneno=?", changeValue, phoneNo)
+		if err != nil {
+			logger.Error("Update account info failed", zap.String("user", phoneNo), zap.String("changeType", changeType), zap.String("changeValue", changeValue), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
 	} else {
 		err := fmt.Errorf("Invalid change type!")
 		return nil, err
 
 	}
-
 }
 
 func doGetFriendList(w http.ResponseWriter, r *http.Request) (interface{}, error) {
