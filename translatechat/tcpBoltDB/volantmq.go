@@ -72,6 +72,17 @@ type UserInfo struct {
 	LastLoginTime string
 	IsFriend      bool
 }
+type SelfInfo struct {
+	PhoneNo       string
+	NickName      string
+	Avatar        string
+	Region        string
+	Signature     string
+	Sex           string
+	RegisterTime  string
+	LastLoginTime string
+}
+
 type GroupedFriendList struct {
 	GroupTitle   string
 	GroupFriends []UserInfo
@@ -405,6 +416,23 @@ func doGetUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) 
 	return user, nil
 }
 
+func doGetSelfInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	var self SelfInfo
+	phoneNo, token, _, err := getAuthFromReq(r)
+	if !checkAuth(phoneNo, token) {
+		err := fmt.Errorf("Invalid authorization information!")
+		return nil, err
+	}
+	//检查用户是否存在
+	err = db.QueryRow("SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time, avatar FROM users WHERE phoneno=?", phoneNo).Scan(
+		&self.PhoneNo, &self.NickName, &self.Region, &self.Signature, &self.Sex, &self.RegisterTime, &self.LastLoginTime, &self.Avatar)
+	if err != nil {
+		logger.Error("Query user doesn't exists", zap.String("issue_user", phoneNo), zap.String("query_user", phoneNo))
+		return nil, err
+	}
+	return self, nil
+}
+
 func doChangeUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	phoneNo, token, _, err := getAuthFromReq(r)
 	if !checkAuth(phoneNo, token) {
@@ -589,6 +617,11 @@ func handleGetUserInfo(w http.ResponseWriter, r *http.Request) {
 	HandleResponse(w, r, resp, err)
 }
 
+func handleGetSelfInfo(w http.ResponseWriter, r *http.Request) {
+	resp, err := doGetSelfInfo(w, r)
+	HandleResponse(w, r, resp, err)
+}
+
 func handleChangeUserInfo(w http.ResponseWriter, r *http.Request) {
 	resp, err := doChangeUserInfo(w, r)
 	HandleResponse(w, r, resp, err)
@@ -618,6 +651,7 @@ func startApiListener() {
 	http.HandleFunc("/users/register/get_validate_code", handleGetValidateCode)
 	http.HandleFunc("/users/login", handleLogin)
 	http.HandleFunc("/users/get_user_info", handleGetUserInfo)
+	http.HandleFunc("/users/get_self_info", handleGetSelfInfo)
 	http.HandleFunc("/users/change_user_info", handleChangeUserInfo)
 	http.HandleFunc("/friends/get_list", handleGetFriendList)
 	http.HandleFunc("/friends/add_friend", handleAddFriend)
