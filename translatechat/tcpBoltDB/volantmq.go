@@ -35,6 +35,7 @@ import (
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/transport"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -71,6 +72,7 @@ type UserInfo struct {
 	Sex           string
 	RegisterTime  string
 	LastLoginTime string
+	QRCodeUrl     string
 	IsFriend      bool
 }
 type SelfInfo struct {
@@ -82,6 +84,7 @@ type SelfInfo struct {
 	Sex           string
 	RegisterTime  string
 	LastLoginTime string
+	QRCodeUrl     string
 }
 
 type GroupedFriendList struct {
@@ -216,7 +219,9 @@ func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error)
 		PhoneNo    string
 		ExpireTime string
 		Token      string
+		QrCodeUrl  string
 	}{}
+	var qrcodeUrl string
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		logger.Error("Could't read request body", zap.Error(err))
@@ -246,6 +251,20 @@ func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error)
 			logger.Error("Server error, unable to create your account", zap.Error(err))
 			return nil, err
 		}
+		//为该账号生成二维码图片并保存
+		dir := "./upload/" + regInfo.PhoneNo
+		err = os.MkdirAll(dir, os.ModePerm)
+		if err != nil {
+			return nil, err
+		}
+		err = qrcode.WriteFile(regInfo.PhoneNo, qrcode.Medium, 256, dir+"/qrcode.png")
+		if err != nil {
+			logger.Error("Server error, unable to create qr code", zap.String("user", regInfo.PhoneNo), zap.Error(err))
+			return nil, err
+		}
+		//保存下载路径到数据库
+		qrcodeUrl = "download/" + regInfo.PhoneNo + "/qrcode.png"
+
 		t := time.Now().Add(time.Hour * time.Duration(expireAt))
 		expireTime := t.Format("2006-01-02 15:04:05")
 
@@ -254,7 +273,8 @@ func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error)
 				return err
 			}
 			now := time.Now().Format("2006-01-02 15:04:05")
-			if _, err := tx.Exec("INSERT INTO users(phoneno, nickname, register_time, last_login_time) VALUES(?, ?, ?, ?)", regInfo.PhoneNo, regInfo.PhoneNo, now, now); err != nil {
+			if _, err := tx.Exec("INSERT INTO users(phoneno, nickname, qrcode_url, register_time, last_login_time) VALUES(?, ?, ?, ?, ?)",
+				regInfo.PhoneNo, regInfo.PhoneNo, qrcodeUrl, now, now); err != nil {
 				return err
 			}
 			return nil
@@ -266,6 +286,7 @@ func doUserRegister(w http.ResponseWriter, r *http.Request) (interface{}, error)
 		ret.PhoneNo = regInfo.PhoneNo
 		ret.Token = token
 		ret.ExpireTime = expireTime
+		ret.QrCodeUrl = qrcodeUrl
 
 		logger.Info("Create account success", zap.String("PhoneNo", regInfo.PhoneNo))
 		return ret, nil
@@ -400,8 +421,8 @@ func doGetUserInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) 
 	}
 	queryPhoneNo := r.URL.Query().Get("phoneNo")
 	//检查用户是否存在
-	err = db.QueryRow("SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time FROM users WHERE phoneno=?", queryPhoneNo).Scan(
-		&user.PhoneNo, &user.NickName, &user.Region, &user.Signature, &user.Sex, &user.RegisterTime, &user.LastLoginTime)
+	err = db.QueryRow("SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time, avatar, qrcode_url FROM users WHERE phoneno=?", queryPhoneNo).Scan(
+		&user.PhoneNo, &user.NickName, &user.Region, &user.Signature, &user.Sex, &user.RegisterTime, &user.LastLoginTime, &user.Avatar, &user.QRCodeUrl)
 	if err != nil {
 		logger.Error("Query user doesn't exists", zap.String("issue_user", phoneNo), zap.String("query_user", queryPhoneNo))
 		return nil, err
@@ -425,8 +446,8 @@ func doGetSelfInfo(w http.ResponseWriter, r *http.Request) (interface{}, error) 
 		return nil, err
 	}
 	//检查用户是否存在
-	err = db.QueryRow("SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time, avatar FROM users WHERE phoneno=?", phoneNo).Scan(
-		&self.PhoneNo, &self.NickName, &self.Region, &self.Signature, &self.Sex, &self.RegisterTime, &self.LastLoginTime, &self.Avatar)
+	err = db.QueryRow("SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time, avatar, qrcode_url FROM users WHERE phoneno=?", phoneNo).Scan(
+		&self.PhoneNo, &self.NickName, &self.Region, &self.Signature, &self.Sex, &self.RegisterTime, &self.LastLoginTime, &self.Avatar, &self.QRCodeUrl)
 	if err != nil {
 		logger.Error("Query user doesn't exists", zap.String("issue_user", phoneNo), zap.String("query_user", phoneNo))
 		return nil, err
@@ -504,7 +525,7 @@ func doGetFriendList(w http.ResponseWriter, r *http.Request) (interface{}, error
 		return nil, err
 	}
 	var rows *sql.Rows
-	sqlStr := `SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time FROM users WHERE phoneno IN ( SELECT phoneno_b FROM  friendship WHERE phoneno_a=?)`
+	sqlStr := `SELECT phoneno, nickname, region, signature, sex, register_time, last_login_time, avatar, qrcode_url FROM users WHERE phoneno IN ( SELECT phoneno_b FROM  friendship WHERE phoneno_a=?)`
 	rows, err = db.Query(sqlStr, phoneNo)
 	if err != nil {
 		logger.Error("Query friends failed", zap.String("issue_user", phoneNo), zap.Error(err))
@@ -514,7 +535,7 @@ func doGetFriendList(w http.ResponseWriter, r *http.Request) (interface{}, error
 	var friends []UserInfo
 	for rows.Next() {
 		var user UserInfo
-		if err := rows.Scan(&user.PhoneNo, &user.NickName, &user.Region, &user.Signature, &user.Sex, &user.RegisterTime, &user.LastLoginTime); err != nil {
+		if err := rows.Scan(&user.PhoneNo, &user.NickName, &user.Region, &user.Signature, &user.Sex, &user.RegisterTime, &user.LastLoginTime, &user.Avatar, &user.QRCodeUrl); err != nil {
 			logger.Error("Scan friend failed", zap.String("issue_user", phoneNo), zap.Error(err))
 		}
 		user.IsFriend = true
@@ -642,7 +663,7 @@ func doUploadPhoto(w http.ResponseWriter, r *http.Request) (interface{}, error) 
 	io.Copy(f, file)
 
 	//保存下载路径到数据库
-	newFileName := phoneNo + "/avatar." + suffix
+	newFileName := "download/" + phoneNo + "/avatar." + suffix
 	_, err = db.Exec("UPDATE users SET avatar=? WHERE phoneno=?", newFileName, phoneNo)
 	if err != nil {
 		logger.Error("Update account avatar failed", zap.String("user", phoneNo), zap.String("avatr_url", newFileName), zap.Error(err))
