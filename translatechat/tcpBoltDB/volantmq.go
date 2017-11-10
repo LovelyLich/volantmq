@@ -828,7 +828,6 @@ func main() {
 	}
 
 	srv, err = volantmq.NewServer(serverConfig)
-
 	if err != nil {
 		logger.Error("Couldn't create server", zap.Error(err))
 		os.Exit(1)
