@@ -276,24 +276,37 @@ func text2audio(text, mp3File, saveAudioFile string) error {
 	}
 	return nil
 }
+func UpdateToken() {
+	dir := "/tmp/translatechat/"
+	err := os.MkdirAll(dir, os.ModePerm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		if t, err := getToken(); err != nil {
+			log.Fatal(err)
+			time.Sleep(time.Second * 20)
+		} else {
+			token = t
+			err = ioutil.WriteFile(dir+"token", []byte(token), 0644)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Printf("Updated token %s\n", token)
+			time.Sleep(time.Hour * 24 * 20)
+		}
+	}
+}
 func main() {
 	var (
 		err error
 		p   *nsq.Producer
 		c   *nsq.Consumer
 	)
-	go func() {
-		for {
-			if t, err := getToken(); err != nil {
-				log.Fatal(err)
-				time.Sleep(time.Second * 20)
-			} else {
-				token = t
-				fmt.Printf("Updated token %s\n", token)
-				time.Sleep(time.Hour * 24 * 20)
-			}
-		}
-	}()
+	go UpdateToken()
+	//wait for token initialzied
 	for {
 		if token == "" {
 			time.Sleep(time.Second * 10)
